@@ -1,76 +1,91 @@
 import net from 'node:net';
+import crypto from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
 import pg from 'pg';
 import ZKLib from 'node-zklib';
 import { mountIntegrations } from './integrations.js';
+import { mountEmployees, countryCode } from './employees.js';
+import { localizedPage } from './i18n/index.js';
+import { mountOrganization } from './organization.js';
+import { mountDevicePush } from './device-push.js';
+import { writeUser, deviceName, readsEnabled } from './zk-device.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const app=express(); const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
+// Without a listener, an idle client dropped by PostgreSQL (restart, network) crashes the process; the pool replaces it.
+pool.on('error',e=>console.error('PostgreSQL idle client error:',e.code||e.message));
 const dir=path.dirname(fileURLToPath(import.meta.url));
 if(!process.env.ADMIN_TOKEN||process.env.ADMIN_TOKEN.length<24||!process.env.DATABASE_URL){throw new Error('Set DATABASE_URL and a strong ADMIN_TOKEN in .env');}
+// Username/password sign-in is optional: without ADMIN_USERNAME/ADMIN_PASSWORD, or with a weak
+// password, it stays off and the admin token keeps working, so existing installations start unchanged.
+const loginUser=process.env.ADMIN_USERNAME||'',loginPass=process.env.ADMIN_PASSWORD||'';
+const signInProblem=!loginUser||!loginPass?'ADMIN_USERNAME/ADMIN_PASSWORD not set'
+ :loginPass.length<12?'ADMIN_PASSWORD is shorter than 12 characters'
+ :['REPLACE_WITH_A_STRONG_PASSWORD','CHANGE_ME'].includes(loginPass)?'ADMIN_PASSWORD is still the example placeholder':null;
+if(signInProblem)console.warn('Username/password sign-in disabled: '+signInProblem+'. The admin token still works.');
 app.use(helmet({contentSecurityPolicy:false}));app.use(express.json({limit:'64kb'}));
 app.get('/health',async(req,res)=>{try{await pool.query('SELECT 1');res.json({ok:true,db:'connected'});}catch{res.status(503).json({ok:false,db:'unavailable'});}});
-app.use('/api', (req,res,next)=>{if(req.get('X-Admin-Token')!==process.env.ADMIN_TOKEN)return res.status(401).json({error:'Unauthorized'});next();});
+// Constant-time comparison so response timing does not leak how much of a guessed token matched.
+const adminToken=Buffer.from(process.env.ADMIN_TOKEN);
+const tokenMatches=v=>{const b=Buffer.from(String(v??''));return b.length===adminToken.length&&crypto.timingSafeEqual(b,adminToken);};
+// Username/password sign-in issues a random session token; the admin token itself never reaches the
+// browser this way. Sessions live in memory only (a restart signs everyone out) and end after
+// SESSION_IDLE without requests or SESSION_MAX in total, or on sign-out. Hashing both sides first
+// gives equal-length buffers, so comparisons stay constant-time whatever the input length.
+const digest=v=>crypto.createHash('sha256').update(String(v??'')).digest();
+const sameSecret=(a,b)=>crypto.timingSafeEqual(digest(a),digest(b));
+const SESSION_IDLE=30*60e3,SESSION_MAX=12*3600e3,MAX_SESSIONS=50;
+const sessions=new Map(); // sha256(token) -> {created, seen}
+function sessionValid(v){
+ if(!v)return false;
+ const k=digest(v).toString('hex'),s=sessions.get(k),now=Date.now();
+ if(!s)return false;
+ if(now-s.seen>SESSION_IDLE||now-s.created>SESSION_MAX){sessions.delete(k);return false;}
+ s.seen=now;return true;
+}
+// Per client address: 5 failures within 15 minutes lock sign-in, for 1 minute the first time and
+// twice as long each further time (at most 15 minutes). A correct password is refused while locked.
+// req.ip is the socket address ('trust proxy' is off), so it cannot be spoofed with headers.
+const RATE={fails:5,window:15*60e3,lock:60e3,maxLock:15*60e3};
+const attempts=new Map(); // ip -> {fails:[time], lockouts, until}
+app.get('/auth/config',(req,res)=>res.json({password_sign_in:!signInProblem}));
+app.post('/auth/login',(req,res)=>{
+ res.set('Cache-Control','no-store');
+ if(signInProblem)return res.status(503).json({error:'Username/password sign-in is not configured on this server. Use the admin token.'});
+ const ip=req.ip,now=Date.now();
+ const a=attempts.get(ip)||{fails:[],lockouts:0,until:0};
+ if(a.until>now){res.set('Retry-After',String(Math.ceil((a.until-now)/1000)));return res.status(429).json({error:'Too many attempts. Try again later.',retry_after_seconds:Math.ceil((a.until-now)/1000)});}
+ if(now-a.until>24*3600e3)a.lockouts=0;
+ const {username,password}=req.body||{};
+ const valid=typeof username==='string'&&typeof password==='string'&&username.length<=200&&password.length<=200;
+ const userOk=sameSecret(valid?username:'',loginUser),passOk=sameSecret(valid?password:'',loginPass);  // both always evaluated
+ if(!(valid&&userOk&&passOk)){
+  a.fails=a.fails.filter(t=>now-t<RATE.window);a.fails.push(now);
+  if(a.fails.length>=RATE.fails){a.lockouts++;a.until=now+Math.min(RATE.maxLock,RATE.lock*2**(a.lockouts-1));a.fails=[];}
+  attempts.set(ip,a);
+  if(attempts.size>1000)for(const [k,v] of attempts)if(v.until<now&&!v.fails.some(t=>now-t<RATE.window))attempts.delete(k);
+  return res.status(401).json({error:'Invalid username or password'});
+ }
+ attempts.delete(ip);
+ const token=crypto.randomBytes(32).toString('hex');
+ while(sessions.size>=MAX_SESSIONS)sessions.delete(sessions.keys().next().value);  // oldest first
+ sessions.set(digest(token).toString('hex'),{created:now,seen:now});
+ res.json({token,idle_timeout_seconds:SESSION_IDLE/1000,max_age_seconds:SESSION_MAX/1000});
+});
+app.post('/auth/logout',(req,res)=>{sessions.delete(digest(req.get('X-Admin-Token')).toString('hex'));res.json({ok:true});});
+// The admin token keeps working unchanged (scripts, smoke tests, existing installations).
+app.use('/api', (req,res,next)=>{const t=req.get('X-Admin-Token');if(!tokenMatches(t)&&!sessionValid(t))return res.status(401).json({error:'Unauthorized'});next();});
 const wrap=fn=>(req,res,next)=>Promise.resolve(fn(req,res)).catch(next);
 app.get('/api/overview',wrap(async(req,res)=>{const tables=['companies','branches','employees','devices','attendance_events','sync_jobs']; const values={};for(const t of tables){values[t]=Number((await pool.query(`SELECT count(*) AS n FROM ${t}`)).rows[0].n);}res.json(values);}));
-app.get('/api/employees',wrap(async(req,res)=>{const {rows}=await pool.query('SELECT e.id,e.company_id,e.home_branch_id,e.employee_code,e.full_name,e.active,d.device_user_id AS biometric_number,d.device_uid,d.device_id FROM employees e LEFT JOIN LATERAL (SELECT device_user_id,device_uid,device_id FROM device_user_staging WHERE matched_employee_id=e.id ORDER BY last_seen_at DESC LIMIT 1) d ON true ORDER BY e.created_at DESC LIMIT 300');res.json(rows);}));
+mountEmployees(app,pool,wrap);
+mountOrganization(app,pool,wrap);
 app.get('/api/companies',wrap(async(req,res)=>res.json((await pool.query('SELECT * FROM companies ORDER BY name')).rows)));
 app.get('/api/branches',wrap(async(req,res)=>res.json((await pool.query('SELECT id,company_id,name,country FROM branches ORDER BY name')).rows)));
 app.get('/api/devices',wrap(async(req,res)=>res.json((await pool.query('SELECT * FROM devices ORDER BY created_at DESC')).rows)));
 app.post('/api/companies',wrap(async(req,res)=>{const name=String(req.body.name||'').trim();if(!name)return res.status(400).json({error:'Name required'});const {rows}=await pool.query('INSERT INTO companies(name) VALUES($1) RETURNING *',[name]);res.status(201).json(rows[0]);}));
-app.post('/api/branches',wrap(async(req,res)=>{const {company_id,name,country}=req.body;if(!company_id||!name||!country)return res.status(400).json({error:'company_id, name, country required'});const {rows}=await pool.query('INSERT INTO branches(company_id,name,country) VALUES($1,$2,$3) RETURNING *',[company_id,name,country]);res.status(201).json(rows[0]);}));
-
-app.patch('/api/employees/:id',wrap(async(req,res)=>{
- const id=req.params.id;
- if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
-   return res.status(400).json({error:'Invalid employee ID'});
-
- const old=(await pool.query('SELECT * FROM employees WHERE id=$1',[id])).rows[0];
- if(!old)return res.status(404).json({error:'Employee not found'});
-
- const body=req.body||{};
- const code=body.employee_code===undefined?old.employee_code:String(body.employee_code).trim();
- const name=body.full_name===undefined?old.full_name:String(body.full_name).trim();
- const branch=body.home_branch_id===undefined?old.home_branch_id:(body.home_branch_id||null);
- const active=typeof body.active==='boolean'?body.active:old.active;
-
- if(!code||!name)return res.status(400).json({error:'Name and code required'});
-
- if(branch){
-  const check=await pool.query(
-   'SELECT 1 FROM branches WHERE id=$1 AND company_id=$2',
-   [branch,old.company_id]
-  );
-  if(!check.rowCount)
-   return res.status(400).json({error:'Invalid branch for company'});
- }
-
- const result=await pool.query(
-  `UPDATE employees
-   SET employee_code=$2,full_name=$3,home_branch_id=$4,
-       active=$5,updated_at=now()
-   WHERE id=$1 RETURNING *`,
-  [id,code,name,branch,active]
- );
- res.json(result.rows[0]);
-}));
-
-app.delete('/api/employees/:id',wrap(async(req,res)=>{
- const id=req.params.id;
- if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
-   return res.status(400).json({error:'Invalid employee ID'});
-
- const result=await pool.query(
-  'UPDATE employees SET active=false,updated_at=now() WHERE id=$1 RETURNING id',
-  [id]
- );
-
- if(!result.rowCount)return res.status(404).json({error:'Employee not found'});
- res.json({ok:true,message:'Employee deactivated'});
-}));
-
+app.post('/api/branches',wrap(async(req,res)=>{const {company_id,name}=req.body,country=countryCode(req.body.country);if(!company_id||!String(name||'').trim()||!country)return res.status(400).json({error:'company_id, name and a supported country required'});const {rows}=await pool.query('INSERT INTO branches(company_id,name,country) VALUES($1,$2,$3) RETURNING *',[company_id,String(name).trim(),country]);res.status(201).json(rows[0]);}));
 
 app.get('/api/hr-imported-employees',wrap(async(req,res)=>{
  const {rows}=await pool.query(`
@@ -144,63 +159,6 @@ app.patch('/api/hr-imported-employees/:id',wrap(async(req,res)=>{
 }));
 
 
-app.patch('/api/employees/:id/inline',wrap(async(req,res)=>{
- const id=req.params.id;
- const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
- if(!uuid.test(id))
-  return res.status(400).json({error:'Invalid employee ID'});
-
- const old=(await pool.query(
-  'SELECT * FROM employees WHERE id=$1',[id]
- )).rows[0];
-
- if(!old)return res.status(404).json({error:'Employee not found'});
-
- const body=req.body||{};
- const fullName=String(body.full_name??old.full_name).trim();
- const companyId=body.company_id||old.company_id;
- const branchId=body.home_branch_id||null;
-
- if(!fullName||!uuid.test(companyId)||(branchId&&!uuid.test(branchId)))
-  return res.status(400).json({error:'Invalid employee details'});
-
- const company=await pool.query(
-  'SELECT 1 FROM companies WHERE id=$1',[companyId]
- );
- if(!company.rowCount)
-  return res.status(400).json({error:'Company not found'});
-
- if(branchId){
-  const branch=await pool.query(
-   'SELECT 1 FROM branches WHERE id=$1 AND company_id=$2',
-   [branchId,companyId]
-  );
-  if(!branch.rowCount)
-   return res.status(400).json({error:'Branch does not belong to company'});
- }
-
- const result=await pool.query(
-  `UPDATE employees e
-   SET full_name=$2,company_id=$3,home_branch_id=$4,updated_at=now()
-   WHERE e.id=$1
-     AND NOT EXISTS(
-      SELECT 1 FROM employees other
-      WHERE other.company_id=$3
-        AND other.employee_code=e.employee_code
-        AND other.id<>e.id
-     )
-   RETURNING *`,
-  [id,fullName,companyId,branchId]
- );
-
- if(!result.rowCount)
-  return res.status(409).json({error:'Employee code already exists in target company'});
-
- res.json(result.rows[0]);
-}));
-
-app.post('/api/employees',wrap(async(req,res)=>{const {company_id,home_branch_id,employee_code,full_name}=req.body;if(!company_id||!employee_code||!full_name)return res.status(400).json({error:'company_id, employee_code, full_name required'});if(home_branch_id){const v=await pool.query('SELECT 1 FROM branches WHERE id=$1 AND company_id=$2',[home_branch_id,company_id]);if(!v.rowCount)return res.status(400).json({error:'Branch does not belong to company'});}const {rows}=await pool.query('INSERT INTO employees(company_id,home_branch_id,employee_code,full_name) VALUES($1,$2,$3,$4) RETURNING *',[company_id,home_branch_id||null,String(employee_code),String(full_name)]);res.status(201).json(rows[0]);}));
 app.post('/api/devices',wrap(async(req,res)=>{
  const {company_id,branch_id,name,model,ip,port}=req.body||{};
  const devicePort=Number(port||4370);
@@ -303,7 +261,8 @@ async function getEnrollmentContext(employeeId, deviceId) {
  if(dev.ip!== (process.env.EGYPT_ZK_IP||'192.168.1.147') || Number(dev.port)!==Number(process.env.EGYPT_ZK_PORT||4370))return {error:'Only preapproved Egypt MB2000 can be used',status:403};
  return {emp,dev};
 }
-function parseUsers(result){const values=Array.isArray(result)?result:result?.data;if(!Array.isArray(values))throw Error('Unexpected users response');return values;}
+// A transfer error comes back next to a partial list; planning against it could reuse a taken slot.
+function parseUsers(result){if(result&&!Array.isArray(result)&&result.err)throw Error('Device user list was incomplete; nothing was changed');const values=Array.isArray(result)?result:result?.data;if(!Array.isArray(values))throw Error('Unexpected users response');return values;}
 function makePlan(users,emp,requestUserId){
  const userId=String(requestUserId??emp.employee_code).trim();
  if(!/^\d{1,9}$/.test(userId))return {error:'Device user ID must be 1-9 digits; supply device_user_id explicitly',status:400};
@@ -314,6 +273,8 @@ function makePlan(users,emp,requestUserId){
  if(uid>65535)return {error:'No free device UID',status:409};
  const name=String(emp.full_name||'').trim();
  if(!name || Buffer.byteLength(name,'utf8')>23)return {error:'Name must be 1-23 UTF-8 bytes for compatibility with this device protocol',status:400};
+ // The device stores names as ASCII; anything else would be written garbled.
+ if(deviceName(name)?.name!==name)return {error:'Name has characters this device protocol cannot store (Latin letters, digits and punctuation only)',status:400};
  return {uid,userId,name};
 }
 async function readDeviceUsers(dev,callback){
@@ -322,6 +283,7 @@ async function readDeviceUsers(dev,callback){
  finally{try{await zk.disconnect();}catch{}}
 }
 app.post('/api/device-enrollment/preview',wrap(async(req,res)=>{
+ if(!readsEnabled())return res.status(403).json({error:'Device connections are disabled on this server. Set ENABLE_DEVICE_READS=true after approval.'});
  const {employee_id,device_id,device_user_id}=req.body||{};
  const context=await getEnrollmentContext(employee_id,device_id);
  if(context.error)return res.status(context.status).json(context);
@@ -331,6 +293,7 @@ app.post('/api/device-enrollment/preview',wrap(async(req,res)=>{
 }));
 app.post('/api/device-enrollment/push',wrap(async(req,res)=>{
  if(process.env.ENABLE_DEVICE_WRITES!=='true')return res.status(403).json({error:'Device writes disabled. Set ENABLE_DEVICE_WRITES=true after approval.'});
+ if(!readsEnabled())return res.status(403).json({error:'Device connections are disabled on this server. Set ENABLE_DEVICE_READS=true after approval.'});
  const {employee_id,device_id,device_user_id,confirmation,expected_uid}=req.body||{};
  if(confirmation!=='PUSH_ONE_EMPLOYEE')return res.status(400).json({error:'Explicit confirmation required'});
  if(!Number.isInteger(expected_uid)||expected_uid<1)return res.status(400).json({error:'Preview expected_uid required'});
@@ -347,7 +310,8 @@ app.post('/api/device-enrollment/push',wrap(async(req,res)=>{
    if(plan.error)return {error:plan.error,status:plan.status};
    if(plan.uid!==expected_uid)return {error:'Device users changed since preview. Preview again.',status:409};
    // Commit device write, verify by reading back before database link.
-   await zk.setUser(plan.uid,plan.userId,plan.name,'',0,0);
+   // (node-zklib has no setUser; writeUser encodes the record and checks the acknowledgement.)
+   if(!await writeUser(zk,plan))return {error:'Device rejected the write',status:502};
    const after=parseUsers(await zk.getUsers());
    const verified=after.find(u=>String(u.uid)===String(plan.uid) && String(u.userId)===plan.userId);
    if(!verified)return {error:'Write returned but verification failed. Inspect device before retrying.',status:502};
@@ -363,6 +327,15 @@ app.post('/api/device-enrollment/push',wrap(async(req,res)=>{
 }));
 
 mountIntegrations(app,pool,wrap);
+mountDevicePush(app,pool,wrap);
 app.get('/',(req,res)=>res.sendFile(path.resolve(dir,'../public/index.html')));
-app.use((err,req,res,next)=>{console.error('Request failed:',err.code||err.message);res.status(err.code==='23505'?409:500).json({error:err.code==='23505'?'Duplicate identifier':'Request failed; check server logs'});});
+app.get('/ar',wrap(async(req,res)=>res.type('html').send(await localizedPage('ar'))));
+// Bad input rejected by PostgreSQL or the body parser is the client's error (4xx), not a server failure.
+const CLIENT_ERRORS={'23505':[409,'Duplicate identifier'],'22P02':[400,'Invalid identifier'],'23503':[409,'Referenced record is missing or still in use'],
+ 'entity.too.large':[413,'Request body too large'],'entity.parse.failed':[400,'Malformed request body']};
+app.use((err,req,res,next)=>{
+ const known=CLIENT_ERRORS[err.code]||CLIENT_ERRORS[err.type];
+ if(known){console.warn('Request rejected:',err.code||err.type,req.method,req.path);return res.status(known[0]).json({error:known[1]});}
+ console.error('Request failed:',err.code||err.message);res.status(500).json({error:'Request failed; check server logs'});
+});
 app.listen(Number(process.env.PORT||5180),process.env.HOST||'127.0.0.1',()=>console.log('ZK Central MVP running'));
