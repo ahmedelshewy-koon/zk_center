@@ -1,0 +1,16 @@
+﻿.env
+.env.*
+!.env.example
+
+node_modules/
+postgres-dev-data/
+postgres-dev.log
+*.log
+
+deploy/
+release/
+sql/
+*.sql
+*.dump
+*.backup
+*.tar.gz
