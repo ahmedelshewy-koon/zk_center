@@ -1,0 +1,415 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZK Central — Control Center</title><style>
+:root{font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;color:#e9f0ff;background:#0b1120}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0b1120}button,input,select{font:inherit}button{border:0;cursor:pointer;border-radius:9px;padding:10px 15px;background:#4f6df5;color:white;font-weight:600}button:hover{filter:brightness(1.09)}button:disabled{opacity:.45;cursor:not-allowed}.ghost{background:#1f2b44;color:#dce7ff}.danger{background:#713748}.shell{display:grid;grid-template-columns:235px 1fr;min-height:100vh}aside{background:#0e1728;border-right:1px solid #26334e;padding:22px 13px}.brand{display:flex;align-items:center;gap:12px;padding:10px 12px 26px;font-size:21px;font-weight:800}.mark{background:#526fff;padding:12px;border-radius:13px;font-size:14px}nav button{display:block;width:100%;text-align:left;margin:4px 0;background:transparent;color:#aebdd7}nav button.active{background:#24355c;color:#fff}nav button:hover{background:#1c2b48}header{padding:24px 32px;border-bottom:1px solid #26334e;display:flex;align-items:center;justify-content:space-between;gap:15px;background:#111b2f}.title{font-size:26px;font-weight:800;margin:0}.sub{color:#9aacc9;font-size:13px;margin-top:6px}.content{max-width:1240px;margin:auto;padding:26px 30px}.panel{background:#121e32;border:1px solid #2b3a55;border-radius:15px;padding:22px;margin-bottom:18px;box-shadow:0 8px 22px #0002}h2{font-size:17px;margin:0 0 18px}h3{font-size:15px;margin:22px 0 10px}.muted{color:#a5b4cc;font-size:13px}.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.field{display:flex;flex-direction:column;gap:7px}.field label{font-size:12px;color:#b0bfd8}input,select{background:#0e1728;color:#e8efff;border:1px solid #394c69;border-radius:9px;padding:11px 12px;min-width:0;width:100%}input:focus,select:focus{outline:2px solid #546efb66;border-color:#7389ff}input[type=checkbox]{width:auto}.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:17px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th{text-align:left;color:#9eafd0;font-weight:600}th,td{padding:13px;border-bottom:1px solid #2b3b54}td{overflow-wrap:anywhere}.pill{display:inline-flex;padding:5px 8px;background:#184e49;color:#96f8d8;border-radius:100px;font-size:11px}.off{background:#533344;color:#ffc2d0}.statgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}.stat{border:1px solid #314261;border-radius:12px;padding:20px;background:#18263e}.stat strong{font-size:32px;display:block;margin-top:8px}pre{background:#0b1528;border:1px solid #2c3b55;border-radius:8px;overflow:auto;padding:14px;white-space:pre-wrap;word-break:break-word}.notice{padding:12px 15px;border-radius:10px;background:#132e41;border:1px solid #255573;color:#c4e5ff;margin-bottom:15px}.error{background:#402130;border-color:#9a4655;color:#ffe0e0}.hide{display:none!important}.check{display:flex;align-items:center;gap:8px}.check input{margin:0}.foot{font-size:12px;color:#8d9dbb;margin-top:15px}.tiny{font-size:12px}.grow{flex:1}.topaccess{display:flex;align-items:center;gap:8px}.topaccess input{max-width:225px}.sep{border:0;border-top:1px solid #2a3c57;margin:20px 0}@media(max-width:800px){.shell{grid-template-columns:1fr}aside{padding:10px}nav{display:flex;overflow:auto}nav button{white-space:nowrap}.brand{padding:8px}header{padding:18px;display:block}.topaccess{margin-top:15px}.content{padding:15px}.fields,.statgrid{grid-template-columns:1fr}}
+</style></head><body><div class="shell"><aside><div class="brand"><span class="mark">ZK</span>ZK Central</div><nav id="nav"><button data-view="dashboard" class="active">▦ Overview</button><button data-view="employees">♙ Employees</button><button data-view="devices">▣ Biometric Devices</button><button data-view="integrations">⇄ API Integrations</button><button data-view="logs">≡ Sync Logs</button></nav><div class="foot" style="padding:15px">ZK Central · Manual sync mode</div></aside><div><header><div><h1 class="title" id="pageTitle">Overview</h1><div class="sub" id="pageSubtitle">Manage your employees, devices, and integrations.</div></div></header><main class="content"><div id="message" class="notice">Loading dashboard...</div>
+<section id="view-dashboard"><div class="statgrid"><div class="stat"><span class="muted">Companies</span><strong id="statCompanies">—</strong></div><div class="stat"><span class="muted">Employees</span><strong id="statEmployees">—</strong></div><div class="stat"><span class="muted">Devices</span><strong id="statDevices">—</strong></div></div><div class="panel" style="margin-top:18px"><h2>System overview</h2><pre id="overview">Connect to load system data.</pre></div></section>
+<section id="view-employees" class="hide"><div class="panel"><h2>Create company</h2><div class="row"><input style="max-width:300px" id="companyName" placeholder="Company name"><button onclick="createCompany()">Create company</button></div><hr class="sep"><h2>Add employee</h2><div class="fields"><div class="field"><label>Company</label><select id="company" onchange="updateEmployeeBranches()"></select></div><div class="field"><label>Country</label><select id="employeeCountry" onchange="updateEmployeeBranches()"><option value="EG">Egypt</option><option value="SA">Saudi Arabia</option><option value="JO">Jordan</option></select></div><div class="field"><label>Branch</label><select id="employeeBranch"></select></div><div class="field"><label>Employee code</label><input id="code" placeholder="Employee code"></div><div class="field"><label>Full name</label><input id="name" placeholder="Employee full name"></div></div><div class="actions"><button onclick="createEmployee()">Save employee</button></div><p class="muted">Employee creation only saves to PostgreSQL. It does not write to a biometric device.</p></div><div class="panel"><h2>Central employees</h2><div id="employees" class="table-wrap">Connect to load employees.</div>
+<div class="panel">
+<h2>HR Imported Employees</h2>
+<p class="muted">45 imported HR records. Review company and branch before importing.</p>
+<div id="hrImportedEmployees" class="table-wrap">Loading...</div>
+</div>
+</div></section>
+<section id="view-devices" class="hide"><div class="panel"><h2>Register Egypt branch and device</h2><div class="fields"><div class="field"><label>Company for branch</label><select id="branchCompany"></select></div><div class="field"><label>Branch name</label><input id="branchName" placeholder="Cairo"></div></div><div class="actions"><button class="ghost" onclick="createBranch()">Create Egypt branch</button></div><hr class="sep"><div class="fields"><div class="field"><label>Device company</label><select id="deviceCompany"></select></div><div class="field"><label>Device branch</label><select id="branch"></select></div><div class="field"><label>Device name</label><input id="deviceName" value="Egypt MB2000"></div></div><div class="actions"><button onclick="registerEgyptDevice()">Register Egypt MB2000</button></div><p class="muted">Register once only. The device IP is fixed to the previously configured Egypt MB2000 for this legacy operation.</p></div><div class="panel"><h2>Device user staging</h2><div class="row"><select style="max-width:340px" id="importDevice"></select><button onclick="importEgypt()">Import to staging</button><button class="ghost" onclick="showStaging()">View staged users</button><button class="ghost" onclick="scan()">Read-only scan</button></div><pre id="importResult">No recent import.</pre><div class="table-wrap" id="staging"></div><pre id="scan" class="hide"></pre></div></section>
+<section id="view-integrations" class="hide"><div class="panel"><div class="row"><h2 class="grow">Connect a biometric integration server</h2><span class="pill">Manual employee sync</span></div><p class="muted">Enter the receiving endpoint and the API token generated inside ZK-Integration. Credentials are stored encrypted and cannot be read back from the dashboard.</p><div class="fields"><div class="field"><label>Connection name</label><input id="integrationName" placeholder="Egypt biometric server"></div><div class="field"><label>Employee receiving API URL</label><input id="integrationUrl" placeholder="https://your-server/api/employees/receive" spellcheck="false"></div><div class="field"><label>Bearer token</label><input id="integrationToken" type="password" placeholder="Paste token from biometric project" autocomplete="new-password"></div></div><div class="actions"><button onclick="saveIntegration()">Save connection</button><button class="ghost" onclick="clearIntegrationForm()">Clear</button></div></div><div class="panel"><h2>Saved connections</h2><div class="table-wrap" id="integrationsTable">Connect to list saved destinations.</div></div><div class="panel"><h2>Send one employee — manual test</h2><p class="muted">Send employee details to the receiving API. Acceptance by the destination does not confirm that the employee was written to the physical machine.</p><div class="fields"><div class="field"><label>Destination</label><select id="sendDestination"></select></div><div class="field"><label>Employee</label><select id="sendEmployee"></select></div></div><div class="actions"><button onclick="sendEmployee()">Send selected employee</button></div><pre id="sendResult">No employee has been sent.</pre></div></section>
+<section id="view-logs" class="hide"><div class="panel"><div class="row"><h2 class="grow">API synchronization history</h2><button class="ghost" onclick="loadLogs()">Refresh logs</button></div><div class="table-wrap" id="logsTable">Connect to load logs.</div></div></section>
+</main></div></div><script>
+const $=s=>document.getElementById(s);const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let companies=[],employees=[],devices=[],branches=[],integrations=[];
+async function api(p,opts={}){const r=await fetch('/api'+p,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});let d;try{d=await r.json()}catch{throw Error('Server returned a non-JSON response (HTTP '+r.status+')')}if(!r.ok)throw Error(d.error||'HTTP '+r.status);return d;}
+function alertMsg(s,err=false){$('message').textContent=s;$('message').className='notice'+(err?' error':'');}
+async function safe(fn){try{await fn()}catch(e){alertMsg(e.message,true)}}
+function options(items,label){return items.map(x=>`<option value="${esc(x.id)}">${esc(label(x))}</option>`).join('')}
+async function loadAll(){await safe(async()=>{const [o,c,e,d,b]=await Promise.all([api('/overview'),api('/companies'),api('/employees'),api('/devices'),api('/branches')]);companies=c;employees=e;devices=d;branches=b;let co=options(c,x=>x.name);$('company').innerHTML=co;$('branchCompany').innerHTML=co;$('deviceCompany').innerHTML=co;$('branch').innerHTML=options(b,x=>x.name);updateEmployeeBranches();$('importDevice').innerHTML=options(d,x=>x.name+' — '+x.ip);$('sendEmployee').innerHTML=options(e,x=>x.employee_code+' · '+x.full_name);$('overview').textContent=JSON.stringify(o,null,2);$('statCompanies').textContent=c.length;$('statEmployees').textContent=e.length;$('statDevices').textContent=d.length;renderCentralEmployees(e,c,b);alertMsg('Connected. Data loaded successfully.');await loadIntegrations();});}
+async function createCompany(){await safe(async()=>{await api('/companies',{method:'POST',body:JSON.stringify({name:$('companyName').value})});await loadAll()})}
+
+function updateEmployeeBranches(){
+ const companyId=$('company').value;
+ const country=$('employeeCountry').value;
+ const matching=branches.filter(b=>
+   b.company_id===companyId &&
+   b.country?.toUpperCase()===country
+ );
+ $('employeeBranch').innerHTML=options(matching,b=>b.name);
+ if(!matching.length){
+   $('employeeBranch').innerHTML='<option value="">No branch configured</option>';
+ }
+}
+
+
+function editEmployee(id){
+ const e=employees.find(x=>x.id===id);
+ if(!e)return;
+
+ const name=prompt('Employee full name:',e.full_name);
+ if(name===null)return;
+
+ const code=prompt('Employee code:',e.employee_code);
+ if(code===null)return;
+
+ const available=branches.filter(x=>x.company_id===e.company_id);
+ const choices=available.map((x,i)=>
+  (i+1)+'. '+x.name+' ('+x.country+')'
+ ).join('\n');
+
+ const current=available.findIndex(x=>x.id===e.home_branch_id);
+ const answer=prompt(
+  'Select branch number:\n'+choices+'\n0. Unassigned',
+  current>=0?String(current+1):'0'
+ );
+ if(answer===null)return;
+
+ const n=Number(answer);
+ if(!Number.isInteger(n)||n<0||n>available.length){
+  alertMsg('Invalid branch selection',true);
+  return;
+ }
+
+ safe(async()=>{
+  await api('/employees/'+id,{
+   method:'PATCH',
+   body:JSON.stringify({
+    full_name:name,
+    employee_code:code,
+    home_branch_id:n===0?null:available[n-1].id
+   })
+  });
+  await loadAll();
+ });
+}
+
+function toggleEmployee(id,isActive){
+ const e=employees.find(x=>x.id===id);
+ if(!e)return;
+
+ const action=isActive?'deactivate':'activate';
+ if(!confirm('Do you want to '+action+' '+e.full_name+'?'))return;
+
+ safe(async()=>{
+  if(isActive){
+   await api('/employees/'+id,{method:'DELETE'});
+  }else{
+   await api('/employees/'+id,{
+    method:'PATCH',
+    body:JSON.stringify({active:true})
+   });
+  }
+  await loadAll();
+ });
+}
+
+
+
+let hrImportedRecords=[];
+
+function hrCountryCode(v){
+ return ({
+  Egypt:'EG',EG:'EG',
+  'Saudi Arabia':'SA',SA:'SA',
+  Jordan:'JO',JO:'JO'
+ })[v]||v;
+}
+
+function hrSelect(id,items,value,placeholder){
+ return `<select id="${id}">
+ <option value="">${esc(placeholder)}</option>
+ ${items.map(x=>`<option value="${esc(x.value)}"
+ ${String(x.value)===String(value||'')?'selected':''}>
+ ${esc(x.label)}</option>`).join('')}
+ </select>`;
+}
+
+function hrRenderRow(x,editing=false){
+ const id=x.id;
+
+ if(!editing){
+  return `<tr id="hr-row-${id}">
+   <td>${esc(x.name_en||x.name_ar||'')}</td>
+   <td>${esc(x.country||'')}</td>
+   <td>${esc(companies.find(c=>c.id===x.company_id)?.name||'Not assigned')}</td>
+   <td>${esc(branches.find(b=>b.id===x.home_branch_id)?.name||'Not assigned')}</td>
+   <td>${esc(x.biometric_number||'—')}</td>
+   <td>${esc(x.central_uid||'—')}</td>
+   <td>${esc(x.biometric_uid||'—')}</td>
+   <td><button class="ghost tiny" onclick="hrStartEdit('${id}')">Edit</button></td>
+  </tr>`;
+ }
+
+ const country=hrCountryCode(x.country);
+ const countryItems=[
+  {value:'EG',label:'Egypt'},
+  {value:'SA',label:'Saudi Arabia'},
+  {value:'JO',label:'Jordan'}
+ ];
+ const companyItems=companies.map(c=>({value:c.id,label:c.name}));
+
+ const branchItems=branches.filter(b=>
+  b.company_id===x.company_id &&
+  hrCountryCode(b.country)===country
+ ).map(b=>({value:b.id,label:b.name}));
+
+ return `<tr id="hr-row-${id}">
+  <td><input id="hr-name-${id}" value="${esc(x.name_en||x.name_ar||'')}"></td>
+  <td>${hrSelect('hr-country-'+id,countryItems,country,'Country')}</td>
+  <td>${hrSelect('hr-company-'+id,companyItems,x.company_id,'Select company')}</td>
+  <td>${hrSelect('hr-branch-'+id,branchItems,x.home_branch_id,'Select branch')}</td>
+  <td><input id="hr-number-${id}" value="${esc(x.biometric_number||'')}" placeholder="Biometric No."></td>
+  <td><span title="Generated central employee UID">${esc(x.central_uid||'—')}</span></td>
+  <td><input id="hr-deviceuid-${id}" value="${esc(x.biometric_uid||'')}" placeholder="Device UID"></td>
+  <td>
+   <button class="ghost tiny" onclick="hrSaveEdit('${id}')">Save</button>
+   <button class="ghost tiny" onclick="hrCancelEdit('${id}')">Cancel</button>
+  </td>
+ </tr>`;
+}
+
+async function loadHrImportedEmployees(){
+ const target=$('hrImportedEmployees');
+ if(!target)return;
+
+ hrImportedRecords=await api('/hr-imported-employees');
+
+ target.innerHTML=
+ '<table><thead><tr>'+
+ '<th>Employee</th><th>Country</th><th>Company</th>'+
+ '<th>Branch</th><th>Biometric No.</th>'+
+ '<th>Central UID</th><th>Device UID</th><th>Actions</th>'+
+ '</tr></thead><tbody>'+
+ hrImportedRecords.map(x=>hrRenderRow(x)).join('')+
+ '</tbody></table>';
+}
+
+function hrStartEdit(id){
+ const x=hrImportedRecords.find(e=>e.id===id);
+ if(!x)return;
+
+ $('hr-row-'+id).outerHTML=hrRenderRow(x,true);
+
+ $('hr-country-'+id).onchange=()=>hrRefreshBranches(id);
+ $('hr-company-'+id).onchange=()=>hrRefreshBranches(id);
+}
+
+function hrRefreshBranches(id){
+ const company=$('hr-company-'+id).value;
+ const country=$('hr-country-'+id).value;
+
+ const choices=branches.filter(b=>
+  b.company_id===company &&
+  hrCountryCode(b.country)===country
+ ).map(b=>({value:b.id,label:b.name}));
+
+ const target=$('hr-branch-'+id);
+ target.outerHTML=hrSelect(
+  'hr-branch-'+id,choices,'','Select branch'
+ );
+}
+
+function hrCancelEdit(id){
+ const x=hrImportedRecords.find(e=>e.id===id);
+ if(x)$('hr-row-'+id).outerHTML=hrRenderRow(x);
+}
+
+function hrSaveEdit(id){
+ const x=hrImportedRecords.find(e=>e.id===id);
+ if(!x)return;
+
+ const name=$('hr-name-'+id).value.trim();
+ const country=$('hr-country-'+id).value;
+ const company=$('hr-company-'+id).value;
+ const branch=$('hr-branch-'+id).value;
+
+ if(!name||!country){
+  alertMsg('Employee name and country are required.',true);
+  return;
+ }
+
+ if(branch&&!company){
+  alertMsg('Select a company before branch.',true);
+  return;
+ }
+
+ safe(async()=>{
+  await api('/hr-imported-employees/'+id,{
+   method:'PATCH',
+   body:JSON.stringify({
+    name_en:name,
+    country:country,
+    company_id:company||null,
+    home_branch_id:branch||null,
+    biometric_number:$('hr-number-'+id).value.trim(),
+    biometric_uid:$('hr-deviceuid-'+id).value.trim()
+   })
+  });
+
+
+  alertMsg('Employee updated successfully.');
+ });
+}
+
+
+function centralCountryCode(value){
+ const codes={
+  'Egypt':'EG','EG':'EG',
+  'Saudi Arabia':'SA','SA':'SA',
+  'Jordan':'JO','JO':'JO'
+ };
+ return codes[value]||value||'';
+}
+
+function centralOptions(items,value,emptyLabel){
+ return '<option value="">'+esc(emptyLabel)+'</option>'+
+  items.map(x=>'<option value="'+esc(x.value)+'" '+
+   (String(x.value)===String(value||'')?'selected':'')+'>'+
+   esc(x.label)+'</option>').join('');
+}
+
+function renderCentralEmployees(list,companyList,branchList){
+ const oldHr=document.getElementById('hrImportedEmployees');
+ if(oldHr)oldHr.closest('.panel')?.style.setProperty('display','none');
+
+ $('employees').innerHTML=
+ '<table><thead><tr>'+
+ '<th>Employee</th><th>Company</th><th>Country</th>'+
+ '<th>Branch</th><th>Biometric No.</th><th>Device UID</th>'+
+ '<th>Status</th><th>Actions</th>'+
+ '</tr></thead><tbody>'+
+ list.map(x=>centralEmployeeRow(x,companyList,branchList,false)).join('')+
+ '</tbody></table>';
+}
+
+function centralEmployeeRow(x,companyList,branchList,editing){
+ const id=x.id;
+ const branch=branchList.find(b=>b.id===x.home_branch_id);
+ const company=companyList.find(c=>c.id===x.company_id);
+
+ if(!editing){
+  return `<tr id="central-row-${id}">
+   <td>${esc(x.full_name)}</td>
+   <td>${esc(company?.name||'Unassigned')}</td>
+   <td>${esc(branch?.country||'Unassigned')}</td>
+   <td>${esc(branch?.name||'Unassigned')}</td>
+   <td>${esc(x.biometric_number||'—')}</td>
+   <td>${esc(x.device_uid||'—')}</td>
+   <td>${x.active?'Active':'Inactive'}</td>
+   <td><div class="row">
+    <button class="ghost tiny" onclick="centralEdit('${id}')">Edit</button>
+    <button class="ghost tiny" onclick="toggleEmployee('${id}',${Boolean(x.active)})">${x.active?'Delete':'Activate'}</button>
+   </div></td></tr>`;
+ }
+
+ const countries=[
+  {value:'EG',label:'Egypt'},
+  {value:'SA',label:'Saudi Arabia'},
+  {value:'JO',label:'Jordan'}
+ ];
+
+ const companyOptions=companyList.map(c=>({value:c.id,label:c.name}));
+ const country=centralCountryCode(branch?.country);
+
+ const branchOptions=branchList.filter(b=>
+   b.company_id===x.company_id &&
+   centralCountryCode(b.country)===country
+ ).map(b=>({value:b.id,label:b.name}));
+
+ return `<tr id="central-row-${id}">
+  <td><input id="ce-name-${id}" value="${esc(x.full_name)}"></td>
+  <td><select id="ce-company-${id}">${centralOptions(companyOptions,x.company_id,'Choose company')}</select></td>
+  <td><select id="ce-country-${id}">${centralOptions(countries,country,'Choose country')}</select></td>
+  <td><select id="ce-branch-${id}">${centralOptions(branchOptions,x.home_branch_id,'Unassigned')}</select></td>
+  <td>${esc(x.biometric_number||'—')}</td>
+  <td>${esc(x.device_uid||'—')}</td>
+  <td>${x.active?'Active':'Inactive'}</td>
+  <td><div class="row">
+   <button class="ghost tiny" onclick="centralSave('${id}')">Save</button>
+   <button class="ghost tiny" onclick="centralCancel('${id}')">Cancel</button>
+  </div></td>
+ </tr>`;
+}
+
+function centralEdit(id){
+ const x=employees.find(e=>e.id===id);
+ if(!x)return;
+
+ $('central-row-'+id).outerHTML=
+  centralEmployeeRow(x,companies,branches,true);
+
+ $('ce-country-'+id).onchange=()=>centralRefreshBranches(id);
+ $('ce-company-'+id).onchange=()=>centralRefreshBranches(id);
+}
+
+function centralRefreshBranches(id){
+ const company=$('ce-company-'+id).value;
+ const country=$('ce-country-'+id).value;
+
+ const choices=branches.filter(b=>
+  b.company_id===company &&
+  centralCountryCode(b.country)===country
+ ).map(b=>({value:b.id,label:b.name}));
+
+ $('ce-branch-'+id).innerHTML=
+  centralOptions(choices,'','Unassigned');
+}
+
+function centralCancel(id){
+ const x=employees.find(e=>e.id===id);
+ if(x)$('central-row-'+id).outerHTML=
+  centralEmployeeRow(x,companies,branches,false);
+}
+
+function centralSave(id){
+ const name=$('ce-name-'+id).value.trim();
+ const company=$('ce-company-'+id).value;
+ const branch=$('ce-branch-'+id).value;
+
+ if(!name||!company){
+  alertMsg('Name and company are required.',true);
+  return;
+ }
+
+ safe(async()=>{
+  await api('/employees/'+id+'/inline',{
+   method:'PATCH',
+   body:JSON.stringify({
+    full_name:name,
+    company_id:company,
+    home_branch_id:branch||null
+   })
+  });
+
+  await loadAll();
+  alertMsg('Employee updated successfully.');
+ });
+}
+
+async function createEmployee(){if(!$('employeeBranch').value){alertMsg('Select a valid company, country and branch.',true);return;}await safe(async()=>{await api('/employees',{method:'POST',body:JSON.stringify({company_id:$('company').value,home_branch_id:$('employeeBranch').value,employee_code:$('code').value,full_name:$('name').value})});await loadAll()})}
+async function createBranch(){await safe(async()=>{await api('/branches',{method:'POST',body:JSON.stringify({company_id:$('branchCompany').value,name:$('branchName').value,country:'EG'})});await loadAll()})}
+async function registerEgyptDevice(){await safe(async()=>{if(!confirm('Register the Egypt MB2000 under the selected company and branch?'))return;await api('/devices',{method:'POST',body:JSON.stringify({company_id:$('deviceCompany').value,branch_id:$('branch').value,name:$('deviceName').value,model:'MB2000',ip:'192.168.1.147',port:4370})});await loadAll()})}
+async function importEgypt(){await safe(async()=>{if(!confirm('Import device users to review staging only?'))return;const r=await api('/device-import/egypt',{method:'POST',body:JSON.stringify({device_id:$('importDevice').value})});$('importResult').textContent=JSON.stringify(r,null,2);await showStaging();alertMsg('Device users staged for review.')})}
+async function showStaging(){await safe(async()=>{const rows=await api('/device-import/staging?device_id='+encodeURIComponent($('importDevice').value));$('staging').innerHTML='<table><thead><tr><th>Device UID</th><th>User ID</th><th>Name</th><th>Status</th></tr></thead><tbody>'+rows.map(x=>`<tr><td>${esc(x.device_uid)}</td><td>${esc(x.device_user_id)}</td><td>${esc(x.device_name)}</td><td>${esc(x.review_status)}</td></tr>`).join('')+'</tbody></table>'})}
+async function scan(){await safe(async()=>{$('scan').classList.remove('hide');$('scan').textContent=JSON.stringify(await api('/egypt/scan-preview'),null,2);alertMsg('Read-only scan completed.')})}
+function clearIntegrationForm(){$('integrationName').value='';$('integrationUrl').value='';$('integrationToken').value=''}
+async function loadIntegrations(){integrations=await api('/integrations');$('sendDestination').innerHTML=options(integrations.filter(x=>x.is_active),x=>x.name);$('integrationsTable').innerHTML='<table><thead><tr><th>Connection</th><th>Endpoint URL</th><th>Status</th><th>Actions</th></tr></thead><tbody>'+integrations.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.endpoint_url)}</td><td><span class="pill ${x.is_active?'':'off'}">${x.is_active?'Active':'Disabled'}</span></td><td><div class="row"><button class="ghost tiny" onclick="testIntegration('${x.id}')">Test</button><button class="ghost tiny" onclick="toggleIntegration('${x.id}',${!x.is_active})">${x.is_active?'Disable':'Enable'}</button><button class="ghost tiny" onclick="editIntegration('${x.id}')">Edit</button><button class="ghost tiny" onclick="deleteIntegration('${x.id}')">Delete</button></div></td></tr>`).join('')+'</tbody></table>';}
+async function saveIntegration(){await safe(async()=>{const name=$('integrationName').value.trim(),endpoint_url=$('integrationUrl').value.trim(),api_token=$('integrationToken').value;if(!name||!endpoint_url||!api_token){alertMsg('Name, URL and token are required.',true);return}await api('/integrations',{method:'POST',body:JSON.stringify({name,endpoint_url,api_token})});clearIntegrationForm();await loadIntegrations();alertMsg('Connection saved. Token is encrypted at rest.')})}
+async function testIntegration(id){await safe(async()=>{if(!confirm('Send a harmless test request (no employees) to the destination?'))return;const r=await api('/integrations/'+id+'/test',{method:'POST',body:'{}'});alertMsg('Test HTTP '+r.http_status+' — '+r.message,!r.ok);})}
+async function toggleIntegration(id,is_active){await safe(async()=>{if(!confirm((is_active?'Enable':'Disable')+' this integration?'))return;await api('/integrations/'+id,{method:'PATCH',body:JSON.stringify({is_active})});await loadIntegrations();alertMsg('Connection updated.')})}
+
+async function deleteIntegration(id){
+ const d=integrations.find(x=>x.id===id);
+ if(!d)return;
+
+ if(!confirm('Delete connection "'+d.name+'"? Historical sync logs will be kept.'))return;
+
+ await safe(async()=>{
+  await api('/integrations/'+id,{method:'DELETE'});
+  await loadIntegrations();
+  alertMsg('Connection deleted successfully.');
+ });
+}
+
+function editIntegration(id){const d=integrations.find(x=>x.id===id);if(!d)return;const name=prompt('Connection name:',d.name);if(name===null)return;const endpoint_url=prompt('Endpoint URL:',d.endpoint_url);if(endpoint_url===null)return;const api_token=prompt('New token (leave empty to keep existing):','');if(api_token===null)return;safe(async()=>{let body={name,endpoint_url};if(api_token)body.api_token=api_token;await api('/integrations/'+id,{method:'PATCH',body:JSON.stringify(body)});await loadIntegrations();alertMsg('Connection updated.')})}
+async function sendEmployee(){await safe(async()=>{const id=$('sendDestination').value,employee_id=$('sendEmployee').value,emp=employees.find(x=>x.id===employee_id),dest=integrations.find(x=>x.id===id);if(!emp||!dest)throw Error('Select a destination and employee');if(!confirm('Send '+emp.full_name+' ('+emp.employee_code+') to '+dest.name+'? This sends employee data to an external service.'))return;const r=await api('/integrations/'+id+'/send-employee',{method:'POST',body:JSON.stringify({employee_id,confirmation:'SEND_ONE_EMPLOYEE'})});$('sendResult').textContent=JSON.stringify(r,null,2);alertMsg(r.message)})}
+async function loadLogs(){await safe(async()=>{const rows=await api('/integrations/logs');$('logsTable').innerHTML='<table><thead><tr><th>When</th><th>Destination</th><th>Action</th><th>Status</th><th>HTTP</th></tr></thead><tbody>'+rows.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString())}</td><td>${esc(x.integration_name)}</td><td>${esc(x.action)}</td><td>${esc(x.status)}</td><td>${esc(x.response_code||'—')}</td></tr>`).join('')+'</tbody></table>';})}
+const titles={dashboard:['Overview','Central attendance administration'],employees:['Employees','Manage employees in PostgreSQL'],devices:['Biometric Devices','Register and review biometric device users'],integrations:['API Integrations','Connect ZK-Integration servers without hardcoding'],logs:['Sync Logs','Review manual connection tests and employee deliveries']};
+function showView(v){document.querySelectorAll('main section[id^="view-"]').forEach(x=>x.classList.toggle('hide',x.id!=='view-'+v));document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x.dataset.view===v));$('pageTitle').textContent=titles[v][0];$('pageSubtitle').textContent=titles[v][1];if(v==='logs')loadLogs();}
+document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.view)));
+</script></body></html>
+
+<script>window.addEventListener('DOMContentLoaded',()=>loadAll());</script>
